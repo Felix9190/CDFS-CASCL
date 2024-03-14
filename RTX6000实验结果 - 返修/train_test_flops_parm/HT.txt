@@ -1,0 +1,14 @@
+[2024-01-15 15:54:00,833] [INFO] train time per DataSet(s): 868.66531
+[2024-01-15 15:54:00,833] [INFO] test time per DataSet(s): 1.12599
+
+batchsize=之前用错了，用的查询集，而且忘了除batchsize：
+FLOPs: 7981387560.00
+Params: 302616.00
+FLOPs: 7981.39 M
+Params: 0.30 M
+
+batchsize=1：
+FLOPs: 28800552.00
+Params: 302616.00
+FLOPs: 28.80 M
+Params: 0.30 M
