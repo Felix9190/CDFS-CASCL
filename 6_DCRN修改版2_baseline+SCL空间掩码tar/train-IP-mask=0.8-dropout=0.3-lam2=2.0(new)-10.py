@@ -22,8 +22,7 @@ from model.classifier import C_F_Classifier
 from utils.dataloader import get_HBKC_data_loader, Task, get_target_dataset, getMetaTrainLabeledDataset, get_metatrain_Labeled_data_loader, tagetSSLDataset
 from utils import utils, encode_class_label, loss_function, data_augment
 
-# from practice import t_sne
-from sklearn.manifold import TSNE
+from practice import t_sne
 
 
 parser = argparse.ArgumentParser(description="Few Shot Visual Recognition")
@@ -56,7 +55,7 @@ LEARNING_RATE = train_opt['lr']
 lambda_1 = train_opt['lambda_1']
 GPU = config['gpu']
 TAR_CLASS_NUM = train_opt['tar_class_num'] # the number of class
-TAR_LSAMPLE_NUM_PER_CLASS = train_opt['tar_lsample_num_per_class'] # the number of labeled samples per class
+TAR_LSAMPLE_NUM_PER_CLASS = 10 # the number of labeled samples per class
 # hid_units = train_opt['hid_units']
 HIDDEN_CHANNELS = train_opt['hidden_channels']
 WEIGHT_DECAY = train_opt['weight_decay']
@@ -150,7 +149,7 @@ infoNCE_Loss_SSL = loss_function.ContrastiveLoss(batch_size = 128).to(GPU)
 SupConLoss_t = loss_function.SupConLoss(temperature=0.1).to(GPU)
 
 # 实验结果指标
-nDataSet = 1
+nDataSet = 10
 acc = np.zeros([nDataSet, 1]) # 每轮的准确率
 A = np.zeros([nDataSet, TAR_CLASS_NUM]) # 每轮每类的准确率
 k = np.zeros([nDataSet, 1]) # Kappa
@@ -165,9 +164,10 @@ best_G, best_RandPerm, best_Row, best_Column, best_nTrain = None,None,None,None,
 #          1221, 1222, 1223, 1224, 1225, 1226, 1227, 1228, 1229, 1230,
 #          1231, 1232, 1233, 1234, 1235, 1236, 1237, 1238, 1239, 1240]
 
-# seeds = [1236, 1237, 1226, 1227, 1211, 1212, 1216, 1240, 1222, 1223] # IP final seeds version
+seeds = [1236, 1237, 1226, 1227, 1211, 1212, 1216, 1240, 1222, 1223] # IP final seeds version
+# seeds = [1222, 1223]
 
-seeds = [1223] # best classification map and t-SNE
+# seeds = [1223] # best classification map
 
 # 日志设置
 experimentSetting = '{}way_{}shot_{}'.format(TAR_CLASS_NUM, TAR_LSAMPLE_NUM_PER_CLASS, target_data.split('/')[0])
@@ -247,10 +247,8 @@ for iDataSet in range(nDataSet) :
     last_accuracy = 0.0
     best_episode = 0
     total_hit_src, total_num_src, total_hit_tar, total_num_tar, acc_src, acc_tar = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-
-    # all test datas and labels for t-SNE
-    data_embed_collect = []
-    best_data_embed_collect = []
+    # 粗糙类和精细类
+    # total_hit_c, total_num_c, total_hit_f, total_num_f, acc_c, acc_f = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
     train_start = time.time()
     writer = SummaryWriter()
@@ -348,7 +346,7 @@ for iDataSet in range(nDataSet) :
 
         f_loss = f_loss_src + f_loss_tar
 
-        text_align_loss = infoNCE_Loss(semantic_feature_src, support_features_src) + infoNCE_Loss(semantic_feature_tar, support_features_tar)
+        # text_align_loss = infoNCE_Loss(semantic_feature_src, support_features_src) + infoNCE_Loss(semantic_feature_tar, support_features_tar)
 
         # 两次增强
         # augment1_support_proto_tar = torch.FloatTensor(data_augment.random_mask_batch_image(support_tar.data.cpu(), 0.8)) # (16, 200, 7, 7)
@@ -375,22 +373,7 @@ for iDataSet in range(nDataSet) :
         augment_target_ssl_feature = torch.cat([augment1_target_ssl_feature.unsqueeze(1), augment2_target_ssl_feature.unsqueeze(1)], dim=1) # (128, 2, 128)
         scl_loss_tar = SupConLoss_t(augment_target_ssl_feature, target_ssl_label)
         
-        loss = f_loss + 2.0 * text_align_loss + scl_loss_tar # 之前lambda1=2
-
-        # # 计算模型运算量和计算量【重要】计算flops和params的时候把feature_encoder中mapping默认改成target！计算完改回默认值为source【发现】不用改了，thop.profile可以直接把参数输入
-        # print("-----------------------------------------------------------------")
-        # from thop import profile
-        # flops1, params1 = profile(mapping_tar, inputs=(support_tar.to(GPU),))
-        # flops2, params2 = profile(encoder, inputs=(mapping_tar(support_tar.to(GPU)), semantic_support_tar.to(GPU), "support"))
-        #
-        # print('FLOPs: %.2f' % ((flops1 / len(support_tar) + flops2 / len(support_tar))))
-        # print('Params: %.2f' % ((params1 + params2)))
-        # print('FLOPs: %.2f M' % ((flops1 / len(support_tar) + flops2 / len(support_tar)) / 1e6))
-        # print('Params: %.2f M' % ((params1 + params2) / 1e6))
-        # print("====================================================================")
-
-
-
+        loss = f_loss + 2 * scl_loss_tar
 
         # SS_CL
         # train_cl = metatrain_data_loader_src.__iter__().next()  # (256, 128, 9, 9)
@@ -424,10 +407,10 @@ for iDataSet in range(nDataSet) :
 
         if (episode + 1) % 100 == 0:
             # tensor.item() 把张量转换为python标准数字返回，仅适用只有一个元素的张量。
-            logger.info('episode: {:>3d}, f_loss: {:6.4f}, text_align_loss: {:6.4f}, scl_loss_tar: {:6.4f}, loss: {:6.4f}, acc_src: {:6.4f}, acc_tar: {:6.4f}'.format(
+            logger.info('episode: {:>3d}, f_loss: {:6.4f}, scl_loss_tar: {:6.4f}, loss: {:6.4f}, acc_src: {:6.4f}, acc_tar: {:6.4f}'.format(
                 episode + 1,
                 f_loss.item(),
-                text_align_loss.item(),
+                # text_align_loss.item(),
                 scl_loss_tar.item(),
                 loss.item(),
                 acc_src,
@@ -435,7 +418,7 @@ for iDataSet in range(nDataSet) :
 
             # writer.add_scalar('Loss/loss_c', loss_c.item(), episode + 1)  # 名字 y x
             writer.add_scalar('Loss/f_loss', f_loss.item(), episode + 1)
-            writer.add_scalar('Loss/text_align_loss', text_align_loss.item(), episode + 1)
+            # writer.add_scalar('Loss/text_align_loss', text_align_loss.item(), episode + 1)
             writer.add_scalar('Loss/scl_loss_tar', scl_loss_tar.item(), episode + 1)
             writer.add_scalar('Loss/loss', loss.item(), episode + 1)
 
@@ -481,10 +464,6 @@ for iDataSet in range(nDataSet) :
                     batch_size = test_labels.shape[0]
 
                     test_features = encoder(mapping_tar((Variable(test_datas).to(GPU))))
-
-                    # all test datas and labels for t-SNE
-                    data_embed_collect.append(test_features)
-
                     test_features = (test_features - min_value) * 1.0 / (max_value - min_value)
                     predict_labels = KNN_classifier.predict(test_features.cpu().detach().numpy())
                     test_labels = test_labels.numpy()
@@ -518,9 +497,7 @@ for iDataSet in range(nDataSet) :
                     best_predict_all = predict
                     best_G, best_RandPerm, best_Row, best_Column, best_nTrain = G, RandPerm, Row, Column, nTrain
                     k[iDataSet] = metrics.cohen_kappa_score(labels, predict)
-                    # OA最好时候的特征集合，用于t-SNE展示
-                    best_data_embed_collect = data_embed_collect
-                data_embed_collect = []
+
                 logger.info('best episode:[{}], best accuracy={}'.format(best_episode + 1, last_accuracy))
 
     logger.info('iter:{} best episode:[{}], best accuracy={}'.format(iDataSet, best_episode + 1, last_accuracy))
@@ -602,19 +579,6 @@ halfwidth = patch_size // 2
 utils.classification_map(hsi_pic[halfwidth:-halfwidth, halfwidth:-halfwidth, :], best_G[halfwidth:-halfwidth, halfwidth:-halfwidth], 24,  "classificationMap/IP_{}shot.png".format(TAR_LSAMPLE_NUM_PER_CLASS))
 
 
-# t-SNE
-best_data_embed_collect_npy = torch.cat(best_data_embed_collect, axis = 0).cpu().detach().numpy()
-n_samples, n_features = best_data_embed_collect_npy.shape
-# 调用t-SNE对高维的data进行降维，得到的2维的result_2D，shape=(samples,2)
-tsne_2D = TSNE(n_components=2, init='pca', random_state=0)
-result_2D = tsne_2D.fit_transform(best_data_embed_collect_npy)
-color_map = ['darkgray', 'lightcoral', 'salmon', 'peru', 'orange', 'gold', 'yellowgreen', 'darkseagreen',
-             'mediumaquamarine', 'skyblue', 'powderblue', 'thistle', 'plum', 'pink', 'darkgoldenrod', 'tomato']  # 16个类，准备16种颜色
-fig = utils.plot_embedding_2D(result_2D, labels, 'IP', color_map)
-fig.savefig("tsne/SNE_IP.png")
-fig.savefig("tsne/SNE_IP.pdf")
-
-print("OK")
 
 
 

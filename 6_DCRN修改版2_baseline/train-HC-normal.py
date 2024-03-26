@@ -197,7 +197,7 @@ for iDataSet in range(nDataSet) :
     # source_data_loader = get_metatrain_Labeled_data_loader(src_metatrain_data, src_metatrain_label)
 
     #  load target domain data for training and testing
-    train_loader, test_loader, target_da_metatrain_data, G, RandPerm, Row, Column,nTrain, target_aug_data_ssl, target_aug_label_ssl = get_target_dataset(Data_Band_Scaler=Data_Band_Scaler,
+    train_loader, test_loader, target_da_metatrain_data, G, RandPerm, Row, Column,nTrain = get_target_dataset(Data_Band_Scaler=Data_Band_Scaler,
                                                                                                               GroundTruth=GroundTruth,
                                                                                                               class_num=TAR_CLASS_NUM,
                                                                                                               tar_lsample_num_per_class=TAR_LSAMPLE_NUM_PER_CLASS,
@@ -205,8 +205,8 @@ for iDataSet in range(nDataSet) :
                                                                                                               patch_size=patch_size)
 
     # target SSL data
-    target_ssl_dataset = tagetSSLDataset(target_aug_data_ssl, target_aug_label_ssl)
-    target_ssl_dataloader = torch.utils.data.DataLoader(target_ssl_dataset,batch_size=64,shuffle=True, drop_last=True)
+    # target_ssl_dataset = tagetSSLDataset(target_aug_data_ssl, target_aug_label_ssl)
+    # target_ssl_dataloader = torch.utils.data.DataLoader(target_ssl_dataset,batch_size=64,shuffle=True, drop_last=True)
 
     num_supports, num_samples, query_edge_mask, evaluation_mask = utils.preprocess(TAR_CLASS_NUM, SHOT_NUM_PER_CLASS, QUERY_NUM_PER_CLASS, batch_task, GPU)
 
@@ -221,7 +221,7 @@ for iDataSet in range(nDataSet) :
     # 模型初始化
     mapping_src = Mapping(SRC_INPUT_DIMENSION, N_DIMENSION).to(GPU)
     mapping_tar = Mapping(TAR_INPUT_DIMENSION, N_DIMENSION).to(GPU)
-    encoder = Encoder(n_dimension=N_DIMENSION, patch_size=patch_size, emb_size=emb_size, dropout=0.3).to(GPU)
+    encoder = Encoder(n_dimension=N_DIMENSION, patch_size=patch_size, emb_size=emb_size).to(GPU)
 
     # 优化器初始化
     # mapping_src_optim = torch.optim.Adam(mapping_src.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
@@ -258,7 +258,7 @@ for iDataSet in range(nDataSet) :
     train_start = time.time()
     writer = SummaryWriter()
 
-    target_ssl_iter = iter(target_ssl_dataloader)
+    # target_ssl_iter = iter(target_ssl_dataloader)
 
     for episode in range(EPISODE) :
         # print("episode = ", episode)
@@ -292,10 +292,10 @@ for iDataSet in range(nDataSet) :
         support_tar, support_label_tar = support_dataloader_tar.__iter__().next()  # [9, 128, 9, 9]
         query_tar, query_label_tar = query_dataloader_tar.__iter__().next()  # (171, 128, 9, 9)
 
-        support_features_src, semantic_feature_src = encoder(mapping_src(support_src.to(GPU)), semantic_feature=semantic_support_src.to(GPU), s_or_q = "support") # (9, 160)
+        support_features_src = encoder(mapping_src(support_src.to(GPU)), semantic_feature=semantic_support_src.to(GPU), s_or_q = "support") # (9, 160)
         query_features_src = encoder(mapping_src(query_src.to(GPU))) # (171, 160)  correct
 
-        support_features_tar, semantic_feature_tar = encoder(mapping_tar(support_tar.to(GPU)), semantic_feature=semantic_support_tar.to(GPU), s_or_q = "support")  # (9, 160)
+        support_features_tar = encoder(mapping_tar(support_tar.to(GPU)), semantic_feature=semantic_support_tar.to(GPU), s_or_q = "support")  # (9, 160)
         query_features_tar = encoder(mapping_tar(query_tar.to(GPU)))  # (171, 160)   correct
 
         # # 计算模型运算量和计算量【重要】计算flops和params的时候把feature_encoder中mapping默认改成target！计算完改回默认值为source、【发现】不用改了，thop.profile可以直接把参数输入
@@ -349,7 +349,7 @@ for iDataSet in range(nDataSet) :
 
         f_loss = f_loss_src + f_loss_tar
 
-        text_align_loss = infoNCE_Loss(semantic_feature_src, support_features_src) + infoNCE_Loss(semantic_feature_tar, support_features_tar)
+        # text_align_loss = infoNCE_Loss(semantic_feature_src, support_features_src) + infoNCE_Loss(semantic_feature_tar, support_features_tar)
 
         # # 两次增强
         # augment1_support_proto_tar = torch.FloatTensor(data_augment.random_mask_batch_image(support_tar.data.cpu(), 0.4)) # (16, 200, 7, 7)
@@ -358,24 +358,25 @@ for iDataSet in range(nDataSet) :
         # features_augment = encoder(mapping_tar(augment_support_proto_tar.to(GPU))) # (32, 128)
         # scl_loss_tar = infoNCE_Loss_SSL(features_augment[:TAR_CLASS_NUM, :], features_augment[TAR_CLASS_NUM:, :])
 
-        # 目标域有监督
-        try:
-            target_ssl_data, target_ssl_label = target_ssl_iter.next()
-        except Exception as err:
-            target_ssl_iter = iter(target_ssl_dataloader)
-            target_ssl_data, target_ssl_label = target_ssl_iter.next()
-
-        augment1_target_ssl_data = torch.FloatTensor(data_augment.random_mask_batch_image(target_ssl_data.data.cpu(), 0.2))  # (128, 200, 7, 7)
-        augment2_target_ssl_data = torch.FloatTensor(data_augment.random_mask_batch_image(target_ssl_data.data.cpu(), 0.2))  # (128, 200, 7, 7)
-        augment_target_ssl_data = torch.cat((augment1_target_ssl_data, augment2_target_ssl_data), dim=0)  # (256, 200, 7, 7)
-        features_augment = encoder(mapping_tar(augment_target_ssl_data.to(GPU)))  # (256, 128)
-
-        augment1_target_ssl_feature = F.normalize(features_augment[:len(target_ssl_data), :], dim = 1)  # (128, 128)
-        augment2_target_ssl_feature = F.normalize(features_augment[len(target_ssl_data):, :], dim = 1)  # (128, 128)
-        augment_target_ssl_feature = torch.cat([augment1_target_ssl_feature.unsqueeze(1), augment2_target_ssl_feature.unsqueeze(1)], dim=1) # (128, 2, 128)
-        scl_loss_tar = SupConLoss_t(augment_target_ssl_feature, target_ssl_label)
-
-        loss = f_loss + 2.0 * text_align_loss + scl_loss_tar
+        # # 目标域有监督
+        # try:
+        #     target_ssl_data, target_ssl_label = target_ssl_iter.next()
+        # except Exception as err:
+        #     target_ssl_iter = iter(target_ssl_dataloader)
+        #     target_ssl_data, target_ssl_label = target_ssl_iter.next()
+        #
+        # augment1_target_ssl_data = torch.FloatTensor(data_augment.random_mask_batch_image(target_ssl_data.data.cpu(), 0.2))  # (128, 200, 7, 7)
+        # augment2_target_ssl_data = torch.FloatTensor(data_augment.random_mask_batch_image(target_ssl_data.data.cpu(), 0.2))  # (128, 200, 7, 7)
+        # augment_target_ssl_data = torch.cat((augment1_target_ssl_data, augment2_target_ssl_data), dim=0)  # (256, 200, 7, 7)
+        # features_augment = encoder(mapping_tar(augment_target_ssl_data.to(GPU)))  # (256, 128)
+        #
+        # augment1_target_ssl_feature = F.normalize(features_augment[:len(target_ssl_data), :], dim = 1)  # (128, 128)
+        # augment2_target_ssl_feature = F.normalize(features_augment[len(target_ssl_data):, :], dim = 1)  # (128, 128)
+        # augment_target_ssl_feature = torch.cat([augment1_target_ssl_feature.unsqueeze(1), augment2_target_ssl_feature.unsqueeze(1)], dim=1) # (128, 2, 128)
+        # scl_loss_tar = SupConLoss_t(augment_target_ssl_feature, target_ssl_label)
+        #
+        # loss = f_loss + 2.0 * text_align_loss + scl_loss_tar
+        loss = f_loss
 
         # SS_CL
         # train_cl = metatrain_data_loader_src.__iter__().next()  # (256, 128, 9, 9)
@@ -409,19 +410,17 @@ for iDataSet in range(nDataSet) :
 
         if (episode + 1) % 100 == 0:
             # tensor.item() 把张量转换为python标准数字返回，仅适用只有一个元素的张量。
-            logger.info('episode: {:>3d}, f_loss: {:6.4f}, text_align_loss: {:6.4f}, scl_loss_tar: {:6.4f}, loss: {:6.4f}, acc_src: {:6.4f}, acc_tar: {:6.4f}'.format(
+            logger.info('episode: {:>3d}, f_loss: {:6.4f}, loss: {:6.4f}, acc_src: {:6.4f}, acc_tar: {:6.4f}'.format(
                 episode + 1,
                 f_loss.item(),
-                text_align_loss.item(),
-                scl_loss_tar.item(),
                 loss.item(),
                 acc_src,
                 acc_tar))
 
             # writer.add_scalar('Loss/loss_c', loss_c.item(), episode + 1)  # 名字 y x
             writer.add_scalar('Loss/f_loss', f_loss.item(), episode + 1)
-            writer.add_scalar('Loss/text_align_loss', text_align_loss.item(), episode + 1)
-            writer.add_scalar('Loss/scl_loss_tar', scl_loss_tar.item(), episode + 1)
+            # writer.add_scalar('Loss/text_align_loss', text_align_loss.item(), episode + 1)
+            # writer.add_scalar('Loss/scl_loss_tar', scl_loss_tar.item(), episode + 1)
             writer.add_scalar('Loss/loss', loss.item(), episode + 1)
 
             writer.add_scalar('Acc/acc_src', acc_src, episode + 1)
@@ -452,7 +451,7 @@ for iDataSet in range(nDataSet) :
                 for i, class_id in enumerate(support_real_labels):
                     semantic_support[i] = torch.from_numpy(semantic_mapping_tar[class_id])
 
-                train_features, _ = encoder(mapping_tar(Variable(train_datas).to(GPU)), semantic_feature = semantic_support.to(GPU),  s_or_q = "support")
+                train_features = encoder(mapping_tar(Variable(train_datas).to(GPU)), semantic_feature = semantic_support.to(GPU),  s_or_q = "support")
 
                 max_value = train_features.max()
                 min_value = train_features.min()
@@ -579,21 +578,9 @@ for i in range(TAR_CLASS_NUM):
 #
 # # 4 指的是halfwidth
 # halfwidth = patch_size // 2
-# utils.classification_map(hsi_pic[halfwidth:-halfwidth, halfwidth:-halfwidth, :], best_G[halfwidth:-halfwidth, halfwidth:-halfwidth], 24,  "classificationMap/HC_{}shot.png".format(TAR_LSAMPLE_NUM_PER_CLASS))
-
-
-# t-SNE
-# best_data_embed_collect_npy = torch.cat(best_data_embed_collect, axis = 0).cpu().detach().numpy()
-# n_samples, n_features = best_data_embed_collect_npy.shape
-# # 调用t-SNE对高维的data进行降维，得到的2维的result_2D，shape=(samples,2)
-# tsne_2D = TSNE(n_components=2, init='pca', random_state=0)
-# result_2D = tsne_2D.fit_transform(best_data_embed_collect_npy)
-# color_map = ['darkgray', 'lightcoral', 'salmon', 'peru', 'orange', 'gold', 'yellowgreen', 'darkseagreen',
-#              'mediumaquamarine', 'skyblue', 'powderblue', 'thistle', 'plum', 'pink', 'darkgoldenrod', 'tomato']  # 16个类，准备16种颜色
-# fig = utils.plot_embedding_2D(result_2D, labels, 'IP', color_map)
-# fig.savefig("tsne/SNE_IP.png")
-# fig.savefig("tsne/SNE_IP.pdf")
+# utils.classification_map(hsi_pic[halfwidth:-halfwidth, halfwidth:-halfwidth, :], best_G[halfwidth:-halfwidth, halfwidth:-halfwidth], 24,  "classificationMap/SA_{}shot.png".format(TAR_LSAMPLE_NUM_PER_CLASS))
 #
-# print("OK")
+
+
 
 

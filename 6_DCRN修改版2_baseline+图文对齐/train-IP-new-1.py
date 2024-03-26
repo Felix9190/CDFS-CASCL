@@ -10,7 +10,6 @@ from sklearn.neighbors import KNeighborsClassifier
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 # from sentence_transformers import SentenceTransformer
@@ -19,14 +18,14 @@ from model.mapping import Mapping
 from model.encoder import Encoder
 from model.SimSiam_block import SimSiam
 from model.classifier import C_F_Classifier
-from utils.dataloader import get_HBKC_data_loader, Task, get_target_dataset, getMetaTrainLabeledDataset, get_metatrain_Labeled_data_loader, tagetSSLDataset
+from utils.dataloader import get_HBKC_data_loader, Task, get_target_dataset, getMetaTrainLabeledDataset, get_metatrain_Labeled_data_loader
 from utils import utils, encode_class_label, loss_function, data_augment
 
-# from practice import t_sne
-from sklearn.manifold import TSNE
+from practice import t_sne
+
 
 parser = argparse.ArgumentParser(description="Few Shot Visual Recognition")
-parser.add_argument('--config', type=str, default=os.path.join( './config', 'hanchuan.py'))
+parser.add_argument('--config', type=str, default=os.path.join( './config', 'Indian_pines.py'))
 args = parser.parse_args()
 
 # 加载超参数
@@ -55,7 +54,7 @@ LEARNING_RATE = train_opt['lr']
 lambda_1 = train_opt['lambda_1']
 GPU = config['gpu']
 TAR_CLASS_NUM = train_opt['tar_class_num'] # the number of class
-TAR_LSAMPLE_NUM_PER_CLASS = train_opt['tar_lsample_num_per_class'] # the number of labeled samples per class
+TAR_LSAMPLE_NUM_PER_CLASS = 1 # the number of labeled samples per class
 # hid_units = train_opt['hid_units']
 HIDDEN_CHANNELS = train_opt['hidden_channels']
 WEIGHT_DECAY = train_opt['weight_decay']
@@ -69,12 +68,9 @@ labels_src = ["water", "bare soil school", "bare soil park", "bare soil farmland
 # UP
 # labels_tar = ["Asphalt", "Meadows", "Gravel", "Trees", "Painted metal sheets", "Bare Soil", "Bitumen", "Self Blocking Bricks", "Shadows"]
 # IP
-# labels_tar = ["Alfalfa", "Corn notill", "Corn mintill", "Corn", "Grass pasture", "Grass trees", "Grass pasture mowed", "Hay windrowed", "Oats", "Soybean notill", "Soybean mintill", "Soybean clean", "Wheat", "Woods", "Buildings Grass Trees Drives", "Stone Steel Towers"]
+labels_tar = ["Alfalfa", "Corn notill", "Corn mintill", "Corn", "Grass pasture", "Grass trees", "Grass pasture mowed", "Hay windrowed", "Oats", "Soybean notill", "Soybean mintill", "Soybean clean", "Wheat", "Woods", "Buildings Grass Trees Drives", "Stone Steel Towers"]
 # salinas
 # labels_tar = ["Brocoli green weeds 1", "Brocoli green weeds 2", "Fallow", "Fallow rough plow", "Fallow smooth", "Stubble", "Celery", "Grapes untrained", "Soil vinyard develop", "Corn senesced green weeds","Lettuce romaine 4wk", "Lettuce romaine 5wk", "Lettuce romaine 6wk", "Lettuce romaine 7wk" , "Vinyard untrained", "Vinyard vertical trellis"]
-
-# HC
-labels_tar = ["Strawberry", "Cowpea", "Soybean", "Sorghum", "Water spinach", "Watermelon", "Greens", "Trees", "Grass", "Red roof","Gray roof", "Plastic", "Bare soil", "Road" , "Bright object", "Water"]
 
 # houston
 # labels_tar = ["Healthy grass", "Stressed grass", "Synthetic grass", "Trees", "Soil", "Water", "Residential", "Commercial", "Road", "Highway", "Railway", "Parking Lot 1", "Parking Lot 2", "Tennis Court", "Running Track"]
@@ -141,18 +137,16 @@ for class_ in metatrain_data: # 200 * 18 = 3600
 # 加载目标域数据
 test_data = os.path.join(data_path,target_data)
 test_label = os.path.join(data_path,target_data_gt)
-Data_Band_Scaler, GroundTruth = utils.load_data_hanchuan(test_data, test_label)
+Data_Band_Scaler, GroundTruth = utils.load_data(test_data, test_label)
 
 # 损失初始化
 crossEntropy = nn.CrossEntropyLoss().to(GPU)
 cos_criterion = nn.CosineSimilarity(dim=1).to(GPU)
 
 infoNCE_Loss = loss_function.ContrastiveLoss(batch_size = TAR_CLASS_NUM).to(GPU)
-infoNCE_Loss_SSL = loss_function.ContrastiveLoss(batch_size = 128).to(GPU)
-SupConLoss_t = loss_function.SupConLoss(temperature=0.1).to(GPU)
+infoNCE_Loss_SCL = loss_function.ContrastiveLoss(batch_size = TAR_CLASS_NUM).to(GPU)
 
 # 实验结果指标
-# nDataSet = 10
 nDataSet = 10
 acc = np.zeros([nDataSet, 1]) # 每轮的准确率
 A = np.zeros([nDataSet, TAR_CLASS_NUM]) # 每轮每类的准确率
@@ -162,20 +156,12 @@ best_G, best_RandPerm, best_Row, best_Column, best_nTrain = None,None,None,None,
 
 # 原始 1220这种子在哪个模型表现基本都不好！彭老师RPCL : 1220 -> 1231, 重复 1233。
 # seeds = [1336, 1330, 1220, 1233, 1229, 1236, 1226, 1235, 1337, 1224] # 每轮的随机种子（同李伟）
-# seeds = [1336, 1227, 1228, 1233, 1231, 1236, 1226, 1235, 1337, 1224] # 新种子
 
 # seeds = [1211, 1212, 1213, 1214, 1215, 1216, 1217, 1218, 1219, 1220,
 #          1221, 1222, 1223, 1224, 1225, 1226, 1227, 1228, 1229, 1230,
 #          1231, 1232, 1233, 1234, 1235, 1236, 1237, 1238, 1239, 1240]
 
-# seeds = [1236, 1237, 1226, 1227, 1211, 1212, 1216, 1240, 1222, 1223] # IP final seeds version
-# seeds = [1213, 1214, 1215, 1217, 1218, 1219, 1220, 1221, 1224, 1225,
-#          1228, 1229, 1230, 1231, 1232, 1233, 1234, 1235, 1238, 1239,
-#          1331, 1332, 1333, 1334, 1335, 1336, 1337, 1338, 1339, 1340]
-
-seeds = [1336, 1227, 1228, 1233, 1231, 1236, 1226, 1235, 1337, 1224] # HC
-
-# seeds = [1334] # best classification map and t-SNE
+seeds = [1236, 1237, 1226, 1227, 1211, 1212, 1216, 1240, 1222, 1223]
 
 # 日志设置
 experimentSetting = '{}way_{}shot_{}'.format(TAR_CLASS_NUM, TAR_LSAMPLE_NUM_PER_CLASS, target_data.split('/')[0])
@@ -191,23 +177,19 @@ for iDataSet in range(nDataSet) :
     logger.info('seeds:{}'.format(seeds[iDataSet]))
 
     # np.random.seed(seeds[iDataSet]) # 【严重错误】
+
     utils.same_seeds(seeds[iDataSet])  # 正确：每次都固定所有
 
     # 源域每类200个数据普通分类的数据加载器 (3600,128,9,9) (3600,)
     # source_data_loader = get_metatrain_Labeled_data_loader(src_metatrain_data, src_metatrain_label)
 
     #  load target domain data for training and testing
-    train_loader, test_loader, target_da_metatrain_data, G, RandPerm, Row, Column,nTrain, target_aug_data_ssl, target_aug_label_ssl = get_target_dataset(Data_Band_Scaler=Data_Band_Scaler,
+    train_loader, test_loader, target_da_metatrain_data, G, RandPerm, Row, Column,nTrain = get_target_dataset(Data_Band_Scaler=Data_Band_Scaler,
                                                                                                               GroundTruth=GroundTruth,
                                                                                                               class_num=TAR_CLASS_NUM,
                                                                                                               tar_lsample_num_per_class=TAR_LSAMPLE_NUM_PER_CLASS,
                                                                                                               shot_num_per_class=TAR_LSAMPLE_NUM_PER_CLASS,
                                                                                                               patch_size=patch_size)
-
-    # target SSL data
-    target_ssl_dataset = tagetSSLDataset(target_aug_data_ssl, target_aug_label_ssl)
-    target_ssl_dataloader = torch.utils.data.DataLoader(target_ssl_dataset,batch_size=64,shuffle=True, drop_last=True)
-
     num_supports, num_samples, query_edge_mask, evaluation_mask = utils.preprocess(TAR_CLASS_NUM, SHOT_NUM_PER_CLASS, QUERY_NUM_PER_CLASS, batch_task, GPU)
 
     '''
@@ -221,7 +203,7 @@ for iDataSet in range(nDataSet) :
     # 模型初始化
     mapping_src = Mapping(SRC_INPUT_DIMENSION, N_DIMENSION).to(GPU)
     mapping_tar = Mapping(TAR_INPUT_DIMENSION, N_DIMENSION).to(GPU)
-    encoder = Encoder(n_dimension=N_DIMENSION, patch_size=patch_size, emb_size=emb_size, dropout=0.3).to(GPU)
+    encoder = Encoder(n_dimension=N_DIMENSION, patch_size=patch_size, emb_size=emb_size, dropout=0.1).to(GPU)
 
     # 优化器初始化
     # mapping_src_optim = torch.optim.Adam(mapping_src.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
@@ -254,11 +236,13 @@ for iDataSet in range(nDataSet) :
     last_accuracy = 0.0
     best_episode = 0
     total_hit_src, total_num_src, total_hit_tar, total_num_tar, acc_src, acc_tar = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    # 粗糙类和精细类
+    # total_hit_c, total_num_c, total_hit_f, total_num_f, acc_c, acc_f = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
     train_start = time.time()
     writer = SummaryWriter()
 
-    target_ssl_iter = iter(target_ssl_dataloader)
+    # source_iter = iter(source_data_loader)
 
     for episode in range(EPISODE) :
         # print("episode = ", episode)
@@ -293,44 +277,10 @@ for iDataSet in range(nDataSet) :
         query_tar, query_label_tar = query_dataloader_tar.__iter__().next()  # (171, 128, 9, 9)
 
         support_features_src, semantic_feature_src = encoder(mapping_src(support_src.to(GPU)), semantic_feature=semantic_support_src.to(GPU), s_or_q = "support") # (9, 160)
-        query_features_src = encoder(mapping_src(query_src.to(GPU))) # (171, 160)  correct
+        query_features_src = encoder(mapping_src(query_src.to(GPU))) # (171, 160)
 
         support_features_tar, semantic_feature_tar = encoder(mapping_tar(support_tar.to(GPU)), semantic_feature=semantic_support_tar.to(GPU), s_or_q = "support")  # (9, 160)
-        query_features_tar = encoder(mapping_tar(query_tar.to(GPU)))  # (171, 160)   correct
-
-        # # 计算模型运算量和计算量【重要】计算flops和params的时候把feature_encoder中mapping默认改成target！计算完改回默认值为source、【发现】不用改了，thop.profile可以直接把参数输入
-        # print("-----------------------------------------------------------------")
-        # from thop import profile
-        #
-        # flops1, params1 = profile(mapping_tar, inputs=(support_tar.to(GPU),))
-        # # IDE_block_src.to(GPU)
-        # flops2, params2 = profile(encoder, inputs=(mapping_tar(query_tar.to(GPU)), semantic_support_tar.to(GPU), "support"))
-        #
-        # print('FLOPs: %.2f' % ((flops1 + flops2)))
-        # print('Params: %.2f' % ((params1 + params2)))
-        # print('FLOPs: %.2f M' % ((flops1 + flops2) / 1e6))
-        # print('Params: %.2f M' % ((params1 + params2) / 1e6))
-        # print("====================================================================")
-
-
-        # if episode % 20 == 0:
-        #     # t_sne.t_SNE(semantic_feature_tar.cpu().detach(), torch.tensor(support_real_labels_tar))
-        #     # t_sne.t_SNE(support_features_tar.cpu().detach(), torch.tensor(support_real_labels_tar))
-        #     # t_sne.t_SNE(query_features_tar.cpu().detach(), torch.tensor(query_real_labels_tar))
-        #
-        #     cat_features = torch.cat((spatial_spectral_fusion_feature_tar, semantic_feature_tar, support_features_tar), dim=0)
-        #     # cat_features = torch.cat((spatial_spectral_fusion_feature_tar, semantic_feature_tar), dim=0)
-        #
-        #
-        #     # ss_labels = torch.zeros(TAR_CLASS_NUM)
-        #     semantic_labels = torch.zeros(TAR_CLASS_NUM) + 16
-        #     # fustion_labels = torch.zeros(TAR_CLASS_NUM)
-        #
-        #     # cat_labels = torch.cat((ss_labels, semantic_labels,fustion_labels), dim=0)
-        #     cat_labels = torch.cat((torch.tensor(support_real_labels_tar), semantic_labels, torch.tensor(support_real_labels_tar) ), dim=0) # 0-15
-        #
-        #     t_sne.t_SNE(cat_features.cpu().detach(), torch.Tensor(cat_labels))
-
+        query_features_tar = encoder(mapping_tar(query_tar.to(GPU)))  # (171, 160)
 
         # Prototype
         if SHOT_NUM_PER_CLASS > 1:
@@ -351,31 +301,7 @@ for iDataSet in range(nDataSet) :
 
         text_align_loss = infoNCE_Loss(semantic_feature_src, support_features_src) + infoNCE_Loss(semantic_feature_tar, support_features_tar)
 
-        # # 两次增强
-        # augment1_support_proto_tar = torch.FloatTensor(data_augment.random_mask_batch_image(support_tar.data.cpu(), 0.4)) # (16, 200, 7, 7)
-        # augment2_support_proto_tar = torch.FloatTensor(data_augment.random_mask_batch_image(support_tar.data.cpu(), 0.4)) # (16, 200, 7, 7)
-        # augment_support_proto_tar = torch.cat((augment1_support_proto_tar, augment2_support_proto_tar), dim=0)  # (32, 200, 7, 7)
-        # features_augment = encoder(mapping_tar(augment_support_proto_tar.to(GPU))) # (32, 128)
-        # scl_loss_tar = infoNCE_Loss_SSL(features_augment[:TAR_CLASS_NUM, :], features_augment[TAR_CLASS_NUM:, :])
-
-        # 目标域有监督
-        try:
-            target_ssl_data, target_ssl_label = target_ssl_iter.next()
-        except Exception as err:
-            target_ssl_iter = iter(target_ssl_dataloader)
-            target_ssl_data, target_ssl_label = target_ssl_iter.next()
-
-        augment1_target_ssl_data = torch.FloatTensor(data_augment.random_mask_batch_image(target_ssl_data.data.cpu(), 0.2))  # (128, 200, 7, 7)
-        augment2_target_ssl_data = torch.FloatTensor(data_augment.random_mask_batch_image(target_ssl_data.data.cpu(), 0.2))  # (128, 200, 7, 7)
-        augment_target_ssl_data = torch.cat((augment1_target_ssl_data, augment2_target_ssl_data), dim=0)  # (256, 200, 7, 7)
-        features_augment = encoder(mapping_tar(augment_target_ssl_data.to(GPU)))  # (256, 128)
-
-        augment1_target_ssl_feature = F.normalize(features_augment[:len(target_ssl_data), :], dim = 1)  # (128, 128)
-        augment2_target_ssl_feature = F.normalize(features_augment[len(target_ssl_data):, :], dim = 1)  # (128, 128)
-        augment_target_ssl_feature = torch.cat([augment1_target_ssl_feature.unsqueeze(1), augment2_target_ssl_feature.unsqueeze(1)], dim=1) # (128, 2, 128)
-        scl_loss_tar = SupConLoss_t(augment_target_ssl_feature, target_ssl_label)
-
-        loss = f_loss + 2.0 * text_align_loss + scl_loss_tar
+        loss = f_loss + 2.0 * text_align_loss
 
         # SS_CL
         # train_cl = metatrain_data_loader_src.__iter__().next()  # (256, 128, 9, 9)
@@ -409,11 +335,10 @@ for iDataSet in range(nDataSet) :
 
         if (episode + 1) % 100 == 0:
             # tensor.item() 把张量转换为python标准数字返回，仅适用只有一个元素的张量。
-            logger.info('episode: {:>3d}, f_loss: {:6.4f}, text_align_loss: {:6.4f}, scl_loss_tar: {:6.4f}, loss: {:6.4f}, acc_src: {:6.4f}, acc_tar: {:6.4f}'.format(
+            logger.info('episode: {:>3d}, f_loss: {:6.4f}, text_align_loss: {:6.4f}, loss: {:6.4f}, acc_src: {:6.4f}, acc_tar: {:6.4f}'.format(
                 episode + 1,
                 f_loss.item(),
                 text_align_loss.item(),
-                scl_loss_tar.item(),
                 loss.item(),
                 acc_src,
                 acc_tar))
@@ -421,7 +346,6 @@ for iDataSet in range(nDataSet) :
             # writer.add_scalar('Loss/loss_c', loss_c.item(), episode + 1)  # 名字 y x
             writer.add_scalar('Loss/f_loss', f_loss.item(), episode + 1)
             writer.add_scalar('Loss/text_align_loss', text_align_loss.item(), episode + 1)
-            writer.add_scalar('Loss/scl_loss_tar', scl_loss_tar.item(), episode + 1)
             writer.add_scalar('Loss/loss', loss.item(), episode + 1)
 
             writer.add_scalar('Acc/acc_src', acc_src, episode + 1)
@@ -466,7 +390,6 @@ for iDataSet in range(nDataSet) :
                     batch_size = test_labels.shape[0]
 
                     test_features = encoder(mapping_tar((Variable(test_datas).to(GPU))))
-
                     test_features = (test_features - min_value) * 1.0 / (max_value - min_value)
                     predict_labels = KNN_classifier.predict(test_features.cpu().detach().numpy())
                     test_labels = test_labels.numpy()
@@ -507,7 +430,8 @@ for iDataSet in range(nDataSet) :
     logger.info ("train time per DataSet(s): " + "{:.5f}".format(train_end-train_start))
     logger.info("accuracy list: {}".format(acc))
     logger.info('***********************************************************************************')
-
+    for i in range(len(best_predict_all)):
+        best_G[best_Row[best_RandPerm[best_nTrain + i]]][best_Column[best_RandPerm[best_nTrain + i]]] = best_predict_all[i] + 1
 
 OAMean = np.mean(acc)
 OAStd = np.std(acc)
@@ -533,67 +457,6 @@ for i in range(TAR_CLASS_NUM):
     logger.info ("Class " + str(i) + ": " + "{:.2f}".format(100 * AMean[i]) + " +- " + "{:.2f}".format(100 * AStd[i]))
 
 
-#################classification map################################
 
-# # G一直是GT值，所以best_G也是预测值，需要重新赋值成预测的结果
-# for i in range(len(best_predict_all)):  # 12197
-#     best_G[best_Row[best_RandPerm[best_nTrain + i]]][best_Column[best_RandPerm[best_nTrain + i]]] = best_predict_all[i] + 1
-#
-# hsi_pic = np.zeros((best_G.shape[0], best_G.shape[1], 3))
-# for i in range(best_G.shape[0]):
-#     for j in range(best_G.shape[1]):
-#         if best_G[i][j] == 0:
-#             hsi_pic[i, j, :] = [0, 0, 0]
-#         if best_G[i][j] == 1:
-#             hsi_pic[i, j, :] = [0, 0, 1]
-#         if best_G[i][j] == 2:
-#             hsi_pic[i, j, :] = [0, 1, 0]
-#         if best_G[i][j] == 3:
-#             hsi_pic[i, j, :] = [0, 1, 1]
-#         if best_G[i][j] == 4:
-#             hsi_pic[i, j, :] = [1, 0, 0]
-#         if best_G[i][j] == 5:
-#             hsi_pic[i, j, :] = [1, 0, 1]
-#         if best_G[i][j] == 6:
-#             hsi_pic[i, j, :] = [1, 1, 0]
-#         if best_G[i][j] == 7:
-#             hsi_pic[i, j, :] = [0.5, 0.5, 1]
-#         if best_G[i][j] == 8:
-#             hsi_pic[i, j, :] = [0.65, 0.35, 1]
-#         if best_G[i][j] == 9:
-#             hsi_pic[i, j, :] = [0.75, 0.5, 0.75]
-#         if best_G[i][j] == 10:
-#             hsi_pic[i, j, :] = [0.75, 1, 0.5]
-#         if best_G[i][j] == 11:
-#             hsi_pic[i, j, :] = [0.5, 1, 0.65]
-#         if best_G[i][j] == 12:
-#             hsi_pic[i, j, :] = [0.65, 0.65, 0]
-#         if best_G[i][j] == 13:
-#             hsi_pic[i, j, :] = [0.75, 1, 0.65]
-#         if best_G[i][j] == 14:
-#             hsi_pic[i, j, :] = [0, 0, 0.5]
-#         if best_G[i][j] == 15:
-#             hsi_pic[i, j, :] = [0, 1, 0.75]
-#         if best_G[i][j] == 16:
-#             hsi_pic[i, j, :] = [0.5, 0.75, 1]
-#
-# # 4 指的是halfwidth
-# halfwidth = patch_size // 2
-# utils.classification_map(hsi_pic[halfwidth:-halfwidth, halfwidth:-halfwidth, :], best_G[halfwidth:-halfwidth, halfwidth:-halfwidth], 24,  "classificationMap/HC_{}shot.png".format(TAR_LSAMPLE_NUM_PER_CLASS))
-
-
-# t-SNE
-# best_data_embed_collect_npy = torch.cat(best_data_embed_collect, axis = 0).cpu().detach().numpy()
-# n_samples, n_features = best_data_embed_collect_npy.shape
-# # 调用t-SNE对高维的data进行降维，得到的2维的result_2D，shape=(samples,2)
-# tsne_2D = TSNE(n_components=2, init='pca', random_state=0)
-# result_2D = tsne_2D.fit_transform(best_data_embed_collect_npy)
-# color_map = ['darkgray', 'lightcoral', 'salmon', 'peru', 'orange', 'gold', 'yellowgreen', 'darkseagreen',
-#              'mediumaquamarine', 'skyblue', 'powderblue', 'thistle', 'plum', 'pink', 'darkgoldenrod', 'tomato']  # 16个类，准备16种颜色
-# fig = utils.plot_embedding_2D(result_2D, labels, 'IP', color_map)
-# fig.savefig("tsne/SNE_IP.png")
-# fig.savefig("tsne/SNE_IP.pdf")
-#
-# print("OK")
 
 

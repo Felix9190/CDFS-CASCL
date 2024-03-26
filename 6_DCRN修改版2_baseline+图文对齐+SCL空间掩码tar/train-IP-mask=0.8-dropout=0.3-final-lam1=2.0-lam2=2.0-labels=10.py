@@ -55,7 +55,7 @@ LEARNING_RATE = train_opt['lr']
 lambda_1 = train_opt['lambda_1']
 GPU = config['gpu']
 TAR_CLASS_NUM = train_opt['tar_class_num'] # the number of class
-TAR_LSAMPLE_NUM_PER_CLASS = 1 # the number of labeled samples per class
+TAR_LSAMPLE_NUM_PER_CLASS = 10 # the number of labeled samples per class
 # hid_units = train_opt['hid_units']
 HIDDEN_CHANNELS = train_opt['hidden_channels']
 WEIGHT_DECAY = train_opt['weight_decay']
@@ -373,7 +373,7 @@ for iDataSet in range(nDataSet) :
         augment_target_ssl_feature = torch.cat([augment1_target_ssl_feature.unsqueeze(1), augment2_target_ssl_feature.unsqueeze(1)], dim=1) # (128, 2, 128)
         scl_loss_tar = SupConLoss_t(augment_target_ssl_feature, target_ssl_label)
         
-        loss = f_loss + 2.0 * text_align_loss + scl_loss_tar # 之前lambda1=2
+        loss = f_loss + 2.0 * text_align_loss + 2.0 * scl_loss_tar # 之前lambda1=2
 
         # SS_CL
         # train_cl = metatrain_data_loader_src.__iter__().next()  # (256, 128, 9, 9)
@@ -532,53 +532,53 @@ for i in range(TAR_CLASS_NUM):
 
 #################classification map################################
 
-# G一直是GT值，所以best_G也是预测值，需要重新赋值成预测的结果
-for i in range(len(best_predict_all)):  # 12197
-    best_G[best_Row[best_RandPerm[best_nTrain + i]]][best_Column[best_RandPerm[best_nTrain + i]]] = best_predict_all[i] + 1
-
-hsi_pic = np.zeros((best_G.shape[0], best_G.shape[1], 3))
-for i in range(best_G.shape[0]):
-    for j in range(best_G.shape[1]):
-        if best_G[i][j] == 0:
-            hsi_pic[i, j, :] = [0, 0, 0]
-        if best_G[i][j] == 1:
-            hsi_pic[i, j, :] = [0, 0, 1]
-        if best_G[i][j] == 2:
-            hsi_pic[i, j, :] = [0, 1, 0]
-        if best_G[i][j] == 3:
-            hsi_pic[i, j, :] = [0, 1, 1]
-        if best_G[i][j] == 4:
-            hsi_pic[i, j, :] = [1, 0, 0]
-        if best_G[i][j] == 5:
-            hsi_pic[i, j, :] = [1, 0, 1]
-        if best_G[i][j] == 6:
-            hsi_pic[i, j, :] = [1, 1, 0]
-        if best_G[i][j] == 7:
-            hsi_pic[i, j, :] = [0.5, 0.5, 1]
-        if best_G[i][j] == 8:
-            hsi_pic[i, j, :] = [0.65, 0.35, 1]
-        if best_G[i][j] == 9:
-            hsi_pic[i, j, :] = [0.75, 0.5, 0.75]
-        if best_G[i][j] == 10:
-            hsi_pic[i, j, :] = [0.75, 1, 0.5]
-        if best_G[i][j] == 11:
-            hsi_pic[i, j, :] = [0.5, 1, 0.65]
-        if best_G[i][j] == 12:
-            hsi_pic[i, j, :] = [0.65, 0.65, 0]
-        if best_G[i][j] == 13:
-            hsi_pic[i, j, :] = [0.75, 1, 0.65]
-        if best_G[i][j] == 14:
-            hsi_pic[i, j, :] = [0, 0, 0.5]
-        if best_G[i][j] == 15:
-            hsi_pic[i, j, :] = [0, 1, 0.75]
-        if best_G[i][j] == 16:
-            hsi_pic[i, j, :] = [0.5, 0.75, 1]
-
-# 4 指的是halfwidth
-halfwidth = patch_size // 2
-utils.classification_map(hsi_pic[halfwidth:-halfwidth, halfwidth:-halfwidth, :], best_G[halfwidth:-halfwidth, halfwidth:-halfwidth], 24,  "classificationMap/IP_{}shot.png".format(TAR_LSAMPLE_NUM_PER_CLASS))
-
-
+# # G一直是GT值，所以best_G也是预测值，需要重新赋值成预测的结果
+# for i in range(len(best_predict_all)):  # 12197
+#     best_G[best_Row[best_RandPerm[best_nTrain + i]]][best_Column[best_RandPerm[best_nTrain + i]]] = best_predict_all[i] + 1
+#
+# hsi_pic = np.zeros((best_G.shape[0], best_G.shape[1], 3))
+# for i in range(best_G.shape[0]):
+#     for j in range(best_G.shape[1]):
+#         if best_G[i][j] == 0:
+#             hsi_pic[i, j, :] = [0, 0, 0]
+#         if best_G[i][j] == 1:
+#             hsi_pic[i, j, :] = [0, 0, 1]
+#         if best_G[i][j] == 2:
+#             hsi_pic[i, j, :] = [0, 1, 0]
+#         if best_G[i][j] == 3:
+#             hsi_pic[i, j, :] = [0, 1, 1]
+#         if best_G[i][j] == 4:
+#             hsi_pic[i, j, :] = [1, 0, 0]
+#         if best_G[i][j] == 5:
+#             hsi_pic[i, j, :] = [1, 0, 1]
+#         if best_G[i][j] == 6:
+#             hsi_pic[i, j, :] = [1, 1, 0]
+#         if best_G[i][j] == 7:
+#             hsi_pic[i, j, :] = [0.5, 0.5, 1]
+#         if best_G[i][j] == 8:
+#             hsi_pic[i, j, :] = [0.65, 0.35, 1]
+#         if best_G[i][j] == 9:
+#             hsi_pic[i, j, :] = [0.75, 0.5, 0.75]
+#         if best_G[i][j] == 10:
+#             hsi_pic[i, j, :] = [0.75, 1, 0.5]
+#         if best_G[i][j] == 11:
+#             hsi_pic[i, j, :] = [0.5, 1, 0.65]
+#         if best_G[i][j] == 12:
+#             hsi_pic[i, j, :] = [0.65, 0.65, 0]
+#         if best_G[i][j] == 13:
+#             hsi_pic[i, j, :] = [0.75, 1, 0.65]
+#         if best_G[i][j] == 14:
+#             hsi_pic[i, j, :] = [0, 0, 0.5]
+#         if best_G[i][j] == 15:
+#             hsi_pic[i, j, :] = [0, 1, 0.75]
+#         if best_G[i][j] == 16:
+#             hsi_pic[i, j, :] = [0.5, 0.75, 1]
+#
+# # 4 指的是halfwidth
+# halfwidth = patch_size // 2
+# utils.classification_map(hsi_pic[halfwidth:-halfwidth, halfwidth:-halfwidth, :], best_G[halfwidth:-halfwidth, halfwidth:-halfwidth], 24,  "classificationMap/IP_{}shot.png".format(TAR_LSAMPLE_NUM_PER_CLASS))
+#
+#
 
 
 
