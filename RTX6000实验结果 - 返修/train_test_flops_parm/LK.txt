@@ -1,0 +1,2 @@
+[2024-04-02 15:19:12,520] [INFO] train time per DataSet(s): 1002.92065
+[2024-04-02 15:19:12,520] [INFO] test time per DataSet(s): 32.79427
