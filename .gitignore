@@ -6,6 +6,7 @@ logs/
 classificationMap/
 GroundTruth/
 discard_code/
+discard/
 
 __pycache__
 *.png
